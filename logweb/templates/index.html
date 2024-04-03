@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Player Info</title>
+    <style>
+        #info {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            background-color: #0073e7;
+            padding: 10px;
+            border-bottom: 1px solid #dee2e6;
+        }
+        #squad_log {
+            padding-top: 100px;  /* 新增的样式，用于在 squad_log 的顶部添加空白 */
+        }
+    </style>
+</head>
+<body>
+    <div id="info">
+        <h1 id="player_name">Loading...</h1>
+        <p id="kills">Loading...</p>
+        <p id="ip">Loading...</p>  <!-- 新增的元素用于显示 IP 地址 -->
+    </div>
+    <div id="kill_info">
+        <h2>Kill Info</h2>
+        <p id="kill_info_text">Loading...</p>
+    </div>
+    <div id="squad_log">
+        <h2>Squad Log</h2>
+        <pre id="squad_log_text">Loading...</pre>  <!-- 使用 <pre> 标签来显示 squad.log 的内容 -->
+    </div>
+
+    <script>
+        function updateInfo() {
+            fetch('/api/kills')
+                .then(response => response.json())
+                .then(data => {
+                    document.getElementById('player_name').textContent = data.player_name;
+                    document.getElementById('kills').textContent = '本局你的击杀数: ' + data.kills;
+                });
+
+            fetch('/api/kill_info')
+                .then(response => response.json())
+                .then(data => {
+                    document.getElementById('kill_info_text').textContent = data.join('\n');
+                });
+
+            fetch('/api/ip')  // 新增的 fetch 调用用于获取 IP 地址
+                .then(response => response.json())
+                .then(data => {
+                    document.getElementById('ip').textContent = '你的 IP 地址: ' + data.ip;
+                });
+            fetch('/api/squad_log?_=' + new Date().getTime())
+                .then(response => response.json())
+                .then(data => {
+                    document.getElementById('squad_log_text').textContent = data.log;
+                });
+            fetch('/api/squad_log?_=' + new Date().getTime())
+                .then(response => response.json())
+                .then(data => {
+                    var logLines = data.log.split('\n');  // 将 log 分割成行
+                    logLines.reverse();  // 反转行的顺序
+                    document.getElementById('squad_log_text').textContent = logLines.join('\n');  // 将行连接成一个字符串
+                });
+        }
+
+        // 更新信息
+        updateInfo();
+        // 每10秒更新一次信息
+        setInterval(updateInfo, 10000);
+    </script>
+</body>
+</html>
