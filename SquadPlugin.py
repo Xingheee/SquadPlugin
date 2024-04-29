@@ -18,9 +18,9 @@ config = {
     "JoinWelcomeMode": False,    # 是否开启进服欢迎
     "SquadTimeLimit": False,     # 是否开启小队游戏时间限制
     "squadlimit": 300,          # 小队游戏时间限制
-    "server_ip": "0.0.0.0 28000 RconPassword",  # 服务器IP 端口 密码
-    "key": "123123123123",  # Steam API Key；不开小队限制可以不用
-    "tqkey": "aaabbbcccddd"  # 心知天气API Key；不开进服欢迎可以不用
+    "server_ip": "127.0.0.1 27000 password",  # 服务器IP 端口 密码
+    "key": "123123123",  # Steam API Key
+    "tqkey": "abcabcabc"  # 心知天气API Key
 }
 
 # 日志配置
@@ -39,8 +39,7 @@ class Patterns:
     player_wound = re.compile(r'^\[([0-9.:-]+)]\[([ 0-9]*)]LogSquadTrace: \[DedicatedServer](?:ASQSoldier::)?Wound\(\): Player:(.+) KillingDamage=(?:-)*([0-9.]+) from ([A-z_0-9]+) \(Online IDs: EOS: ([\w\d]{32}) steam: (\d{17}) \| Controller ID: ([\w\d]+)\) caused by ([A-z_0-9-_]+)')
     round_start = re.compile(r'^\[([0-9.:-]+)]\[([ 0-9]*)]LogWorld: Bringing World \/([A-z]+)\/(?:Maps\/)?([A-z0-9-]+)\/(?:.+\/)?([A-z0-9-]+)(?:\.[A-z0-9-]+)')
     round_end = re.compile(r'^\[([0-9.:-]+)]\[([ 0-9]*)]LogSquadGameEvents: Display: Team ([0-9]), (.*) \( ?(.*?) ?\) has (won|lost) the match with ([0-9]+) Tickets on layer (.*) \(level (.*)\)!')
-    player_leave = re.compile(r'^\[([0-9.:-]+)]\[([ 0-9]*)]LogNet: UChannel::Close: Sending CloseBunch\. ChIndex == [0-9]+\. Name: \[UChannel\] ChIndex: [0-9]+, Closing: [0-9]+ \[UNetConnection\] RemoteAddr: ([\d.]+):[\d]+, Name: EOSIpNetConnection_[0-9]+, Driver: GameNetDriver EOSNetDriver_[0-9]+, IsServer: YES, PC: ([^ ]+PlayerController_C_[0-9]+), Owner: [^ ]+PlayerController_C_[0-9]+, UniqueId: RedpointEOS:([\d\w]+)')
-                                
+    player_leave = re.compile(r'^\[([0-9.:-]+)]\[([ 0-9]*)]LogNet: UChannel::Close: Sending CloseBunch\. ChIndex == [0-9]+\. Name: \[UChannel\] ChIndex: [0-9]+, Closing: [0-9]+ \[UNetConnection\] RemoteAddr: ([\d.]+):[\d]+, Name: EOSIpNetConnection_[0-9]+, Driver: GameNetDriver EOSNetDriver_[0-9]+, IsServer: YES, PC: ([^ ]+PlayerController_C_[0-9]+), Owner: [^ ]+PlayerController_C_[0-9]+, UniqueId: RedpointEOS:([\d\w]+)')                        
     server_tps = re.compile(r'^\[([0-9.:-]+)]\[([ 0-9]*)]LogSquad: USQGameState: Server Tick Rate: ([0-9.]+)')
 
 
@@ -76,6 +75,12 @@ def timereformat(Time):
 async def get_player_info(mode, id, need):
     for ids, info in playerinfos.items():
         if info[mode] == id:
+            return info[need]
+    with open('playerinfos.json', 'r') as f:
+        player_info = json.load(f)
+    for ids, info in player_info.items():
+        if info[mode] == id:
+            playerinfos[info['SteamID']] = info
             return info[need]
     return id
 
@@ -123,7 +128,7 @@ async def playtime(steamid):
     except:
         logging.error(f"Error playtime")
         return None
-        
+  
 
 #####################################数据处理部分#####################################
 playerinfos = {}
@@ -132,6 +137,7 @@ players = {}
 roundinfo = {}
 leaveplayer = []
 tps = None
+
 def save_data(data, filename):
     # 先读取原有的内容或创建一个新的空列表或空字典
     if not os.path.exists(filename) or os.path.getsize(filename) == 0:
@@ -157,7 +163,15 @@ def save_data(data, filename):
     with open(filename, 'w') as f:
         json.dump(old_data, f, indent=4)
 #    data.clear()
-
+def data():
+    save_data(playerinfos, 'playerinfos.json')
+    save_data(killrecords, 'killrecords.json')
+    for steamid in leaveplayer:
+        if steamid in playerinfos:
+            del playerinfos[steamid]
+    leaveplayer.clear()
+    killrecords.clear()
+    playerinfos.clear()
 #####################################日志处理部分#####################################
 # 处理玩家伤害
 def handle_player_damaged(line):
@@ -170,6 +184,7 @@ def handle_player_damaged(line):
 def handle_player_died(line):
     match = Patterns.player_died.match(line)
     if match:
+        #print (match.group(0))
         vicname = match.group(3).strip()
         attacker_name = asyncio.run(get_player_info('SteamID', match.group(7), 'playername'))
         kill_info = f"时间：{match.group(1)} | 玩家：{vicname} 寄！！！ 击杀人{attacker_name} SteamID:{match.group(7)} 武器:{match.group(9)}（伤害{float(match.group(4))}）"
@@ -182,9 +197,12 @@ def handle_player_died(line):
             'Damage': float(match.group(4))
         })
         if config["KillFeedMode"] == True:
-        
             try:
-                asyncio.run(kill_feed(attacker_name,vicname,match.group(9)))
+                atkname = attacker_name
+                vicname1 = vicname
+                role = match.group(9)
+                asyncio.run(kill_feed(atkname,vicname1,role))
+                #print (f"kill_feed {attacker_name} {vicname} {match.group(9)}")
             except:
                 pass
         return kill_info
@@ -257,7 +275,7 @@ def handle_player_leave(line):
         return leave_info
 
 
-# 服务器tps 没有添加到输出
+# 服务器tps
 def handle_server_tps(line):
     match = Patterns.server_tps.match(line)
     if match:
@@ -283,21 +301,16 @@ def handle_round_end(line):
         winteam = roundinfo[uid]["winteam"]
         mapname = match.group(8)
         round_info = f"时间：{match.group(1)} | {winteam} {lostteam} 地图：{mapname}"
-######回合结束清理保存数据######
-        save_data(playerinfos, 'playerinfos.json')
-        save_data(killrecords, 'killrecords.json')
-        for steamid in leaveplayer:
-            if steamid in playerinfos:
-                del playerinfos[steamid]
-        leaveplayer.clear()
-        killrecords.clear()
+        data()#回合结束清理保存数据
         return round_info
 
 #####################################插件功能部分#####################################
 # 进服欢迎信息
 async def join_welcome(IP,steamid):
     welcome_info = get_weather(IP)
-    await rcon_command(f"AdminWarnPlayer {steamid} {welcome_info}")
+    response = await rcon_command(f"AdminWarn {steamid} {welcome_info}")
+    print(f"进服欢迎 {response}")
+
 
 # 小队游戏时间限制
 async def time_limit(steamid,name,squadid,team):
@@ -313,10 +326,14 @@ async def time_limit(steamid,name,squadid,team):
 
 # 被击杀反馈
 async def kill_feed(atkname,vicname,weapon):
-    await rcon_command(f"AdminWarn {vicname} {atkname}使用{weapon}击杀了你")
+    response = await rcon_command(f"AdminWarn {vicname} {atkname}（{weapon}）击杀了你")
+    print(f"被击杀反馈 {response}")
+    return
 # 被击倒反馈
 async def Wound_feed(atkname,vicname,weapon):
-    await rcon_command(f"AdminWarn {vicname} {atkname}使用{weapon}击倒了你")
+    response = await rcon_command(f"AdminWarn {vicname} {atkname}使用{weapon}击倒了你")
+    print(f"被击倒反馈 {response}")
+    return
 # 机器人接口
 
 
@@ -334,6 +351,7 @@ handler_names = {
 }
 
 # 读取并解析日志文件
+
 def read_and_parse_log(file_path):
     with open(file_path, 'r', encoding='utf-8', errors='ignore') as file:
         file.seek(0,2)
@@ -348,13 +366,13 @@ def read_and_parse_log(file_path):
                 # 打印异常信息，但继续执行
                 print(f"Error occurred while parsing line: {line}")
                 traceback.print_exc()  # 打印异常的堆栈跟踪信息
-'''#测试使用
+'''
+#测试环境使用
 def read_and_parse_log(file_path):
     with open(file_path, 'r', encoding='utf-8', errors='ignore') as file:
         for line in file:
             parse_line(line)
 '''
-
 # 解析日志行
 def parse_line(line):
     handlers = [
@@ -362,7 +380,7 @@ def parse_line(line):
         handle_player_died,
         handle_create_squad,
         handle_player_join,
-        handle_player_leave,
+        #handle_player_leave,
         handle_player_wound,
         handle_round_start,
         handle_round_end
@@ -385,3 +403,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
